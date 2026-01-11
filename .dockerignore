@@ -1,0 +1,30 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Home Assistant Addon specific
+lifesos2mqtt/
+repository.yaml
+
+# Config (will be mounted as volume)
+config/
+
+# Documentation
+README.md
+*.md
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db

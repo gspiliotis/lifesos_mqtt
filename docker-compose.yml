@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  lifesos2mqtt:
+    build: .
+    container_name: lifesos2mqtt
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+    environment:
+      # Optional: Set timezone
+      - TZ=UTC
+    network_mode: bridge
+    # If you need to expose ports (e.g., for LifeSOS server mode)
+    # ports:
+    #   - "1680:1680"
+
+    # Optional: Add logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

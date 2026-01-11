@@ -1,0 +1,63 @@
+# Configuration file for LifeSOS to MQTT
+# Copy this file to lifesos2mqtt.yaml and edit with your settings
+
+# Settings for the LifeSOS interface
+lifesos:
+  # Host and Port for the LifeSOS TCP Server to connect as a client
+  # Example: 192.168.1.100
+  host: '192.168.1.100'
+  port: 1680
+
+  # Master password, if needed by network interface
+  # Leave empty if no password is required
+  password: ''
+
+# Settings for the MQTT client
+mqtt:
+  # URI providing the details needed to connect to the MQTT broker
+  # Format: mqtt://[username]:[password]@[host]:[port]
+  # Examples:
+  #   - mqtt://localhost:1883 (no auth)
+  #   - mqtt://user:pass@192.168.1.50:1883 (with auth)
+  #   - mqtts://user:pass@broker.example.com:8883 (with SSL/TLS)
+  uri: 'mqtt://localhost:1883'
+
+  # Unique client identifier
+  # Change this if running multiple instances
+  client_id: lifesos
+
+# Settings for the adapter between LifeSOS and MQTT
+adapter:
+  # Home Assistant MQTT discovery prefix
+  # Must match the setting in Home Assistant's configuration
+  # Default: homeassistant
+  discovery_prefix: homeassistant
+
+  # Topic and Payload to announce Home Assistant has come online
+  # When received, the MQTT client will send out device configurations
+  birth_topic: homeassistant/status
+  birth_payload: online
+
+  # Base Unit configuration
+  baseunit:
+    topic: home/alarm
+    name: LifeSOS
+    manufacturer: LifeSOS
+    model: LS-20
+
+  # List your enrolled devices here
+  # Run 'docker-compose run lifesos2mqtt list-devices -c /config/lifesos2mqtt.yaml'
+  # to get a list of device IDs
+  devices:
+    # Example device configuration:
+    # - topic: home/kitchen/pir
+    #   id: 012cba
+    #   name: Kitchen PIR
+    #   manufacturer: LifeSOS
+    #   model: PIR
+    #
+    # - topic: home/front-door/contact
+    #   id: 034def
+    #   name: Front Door
+    #   manufacturer: LifeSOS
+    #   model: Door/Window Sensor

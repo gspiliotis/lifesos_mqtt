@@ -1,0 +1,62 @@
+services:
+  # Example 1: Basic setup with local config
+  lifesos2mqtt:
+    image: lifesos2mqtt:latest
+    container_name: lifesos2mqtt
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=Europe/Stockholm
+    network_mode: bridge
+
+  # Example 2: With external MQTT broker
+  lifesos2mqtt-with-mosquitto:
+    image: lifesos2mqtt:latest
+    container_name: lifesos2mqtt
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+    environment:
+      - TZ=UTC
+    depends_on:
+      - mosquitto
+    networks:
+      - lifesos-network
+
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+    networks:
+      - lifesos-network
+
+  # Example 3: With verbose logging
+  lifesos2mqtt-verbose:
+    image: lifesos2mqtt:latest
+    container_name: lifesos2mqtt-verbose
+    restart: unless-stopped
+    volumes:
+      - ./config:/config
+    command: ["start", "-c", "/config/lifesos2mqtt.yaml", "-v"]
+    network_mode: bridge
+
+  # Example 4: List devices mode (one-time run)
+  lifesos2mqtt-list-devices:
+    image: lifesos2mqtt:latest
+    container_name: lifesos2mqtt-list-devices
+    volumes:
+      - ./config:/config
+    command: ["list-devices", "-c", "/config/lifesos2mqtt.yaml"]
+    network_mode: bridge
+
+networks:
+  lifesos-network:
+    driver: bridge
