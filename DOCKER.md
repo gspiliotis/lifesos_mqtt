@@ -259,16 +259,19 @@ This standalone container works perfectly with Home Assistant's MQTT integration
 
 ## Version
 
-This Docker setup uses NodeSoS_mqtt version 3.0.3 by default. To use a different version, build with:
+The image is built from the sources vendored in `packages/`, not from the npm
+registry, so there is no version build argument. Whatever is committed in this
+repository is what runs in the container.
 
-```bash
-docker build --build-arg NODESOS_MQTT_VERSION=3.0.4 -t lifesos2mqtt:latest .
-```
+The two packages carry their upstream version numbers (`nodesos` 2.1.1,
+`nodesos_mqtt` 3.0.3) plus whatever local changes are committed on top. See
+"Vendored sources" in [README.md](README.md) for how to pull upstream updates.
 
 ## Support
 
-For issues specific to the Docker setup, please open an issue at:
-https://github.com/bratanon/lifesos_addon/issues
+For issues with this container or with the vendored code, open an issue at:
+https://github.com/gspiliotis/lifesos_mqtt/issues
 
-For issues with NodeSoS_mqtt itself, see:
-https://www.npmjs.com/package/nodesos_mqtt
+Upstream projects, for reference:
+- https://github.com/bratanon/nodesos_mqtt
+- https://github.com/bratanon/nodesos

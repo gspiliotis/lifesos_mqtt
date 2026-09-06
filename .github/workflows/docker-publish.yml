@@ -5,7 +5,11 @@ on:
     branches:
       - main
     paths:
+      - 'packages/**'
+      - 'package.json'
+      - 'package-lock.json'
       - 'Dockerfile'
+      - '.dockerignore'
       - 'docker-compose.yml'
       - '.github/workflows/docker-publish.yml'
   workflow_dispatch:

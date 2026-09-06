@@ -54,6 +54,64 @@ The standalone Docker container:
 - Supports Home Assistant MQTT Discovery
 - Works with multiple architectures (amd64, arm64, armv7)
 
+## Vendored sources
+
+The container is built from source held in this repository, not from the npm
+registry. Two upstream projects are vendored under `packages/` as **git
+subtrees**:
+
+| Path | Upstream | Imported from | License |
+|---|---|---|---|
+| `packages/nodesos` | [bratanon/nodesos](https://github.com/bratanon/nodesos) | `master` @ `d84c132` (v2.1.1 + dependency bumps) | MIT |
+| `packages/nodesos_mqtt` | [bratanon/nodesos_mqtt](https://github.com/bratanon/nodesos_mqtt) | `master` @ `11a57d9` (v3.0.3 + dependency bumps) | MIT |
+
+Both are the work of Emil Stjerneman and remain under the MIT licence; each
+package keeps its original `LICENSE.md`. Local modifications live in ordinary
+commits on top of the subtree imports.
+
+The repository is an npm workspace, so `packages/nodesos` is symlinked into
+`node_modules/` and `nodesos_mqtt` compiles against the vendored library rather
+than the published package.
+
+### Building locally
+
+```bash
+npm ci
+npm run build          # parcel builds nodesos, then tsc builds nodesos_mqtt
+npm start -- --help    # runs packages/nodesos_mqtt/dist/index.js
+```
+
+### Pulling upstream updates
+
+The subtrees were added with `--squash`; every later pull must use it too, or
+the histories will not line up.
+
+```bash
+git remote add upstream-nodesos      https://github.com/bratanon/nodesos.git
+git remote add upstream-nodesos_mqtt https://github.com/bratanon/nodesos_mqtt.git
+
+git subtree pull --squash --prefix=packages/nodesos      upstream-nodesos      master
+git subtree pull --squash --prefix=packages/nodesos_mqtt upstream-nodesos_mqtt master
+
+npm install    # refresh the root lockfile if upstream changed dependencies
+npm run build
+```
+
+Conflicts, if any, are resolved in the working tree like any other merge.
+
+### Local changes on top of upstream
+
+- `packages/nodesos_mqtt/src/dump-event-log.ts` — dumps the base unit's internal
+  Contact ID event log by index.
+- `packages/nodesos_mqtt/tsconfig.json` — sets `"rootDir": "src"`. TypeScript 6
+  made the previously inferred value a hard error (TS5011), so upstream does not
+  build on a clean clone without it.
+- `prepare` removed from both packages' `package.json` — husky needs a `.git`
+  directory that does not exist inside the Docker build.
+
+See [CLAUDE.md](CLAUDE.md) for notes on the panel's behaviour and the open
+issues in this code.
+
 ## License
 
 MIT License

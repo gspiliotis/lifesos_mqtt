@@ -1,30 +1,33 @@
+# Never ship the build context's dependencies or build output; the image
+# installs and builds its own inside the builder stage.
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
+.parcel-cache/
+
 # Git
 .git
 .gitignore
 
-# Docker
+# Docker / CI
 Dockerfile
-docker-compose*.yml
 .dockerignore
+docker-compose*.yml
+.github/
 
-# Home Assistant Addon specific
-lifesos2mqtt/
-repository.yaml
-
-# Config (will be mounted as volume)
+# Config is mounted as a volume at runtime
 config/
 
-# Documentation
-README.md
-*.md
+# Documentation and notes (package README/LICENSE files are kept: the
+# patterns above are anchored, so packages/*/README.md still ships)
+/README.md
+/DOCKER.md
+/CLAUDE.md
 
-# Editor
-.vscode
-.idea
+# Editor / OS
+.idea/
+.vscode/
+*.iml
 *.swp
-*.swo
-*~
-
-# OS
 .DS_Store
 Thumbs.db

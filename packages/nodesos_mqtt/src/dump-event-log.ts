@@ -18,13 +18,13 @@
  * year as a guess.
  */
 
-import { Command } from 'commander';
-import { Client, EventLogResponse, GetEventLogCommand } from 'nodesos';
 import fs from 'node:fs';
+import { Command } from 'commander';
 import yaml from 'js-yaml';
 import { getLogger } from 'log4js';
-import { configureLog4j } from './Logger';
+import { Client, EventLogResponse, GetEventLogCommand } from 'nodesos';
 import type { Config } from './index';
+import { configureLog4j } from './Logger';
 
 const logger = getLogger('NodeSOSMQTT');
 
@@ -49,11 +49,24 @@ type Entry = {
   userId?: number;
 };
 
+const resolveLogLevel = (options: Options): string => {
+  if (options.verbose) return 'debug';
+  if (options.json) return 'error';
+  return 'info';
+};
+
+/** Contact ID entries name either a zone or a user, never both. */
+const formatSubject = (entry: Entry): string => {
+  if (entry.zone) return `zone=${entry.zone}`;
+  if (entry.userId !== undefined) return `user=${entry.userId}`;
+  return '';
+};
+
 const isEventLogResponse = (response: unknown): response is EventLogResponse =>
   typeof response === 'object' && response !== null && 'eventCode' in response;
 
 const dumpEventLog = async (options: Options) => {
-  configureLog4j(options.verbose ? 'debug' : options.json ? 'error' : 'info');
+  configureLog4j(resolveLogLevel(options));
 
   if (!fs.existsSync(options.configfile)) {
     throw new Error(`No configuration file found at '${options.configfile}'`);
@@ -123,7 +136,7 @@ const dumpEventLog = async (options: Options) => {
             entry.qualifier.padEnd(8),
             `${entry.eventCode}(${entry.eventCodeValue})`.padEnd(28),
             entry.deviceCategory.padEnd(10),
-            entry.zone ? `zone=${entry.zone}` : entry.userId !== undefined ? `user=${entry.userId}` : '',
+            formatSubject(entry),
           ].join(' '),
         );
       }
@@ -142,7 +155,7 @@ const dumpEventLog = async (options: Options) => {
 const program = new Command();
 program
   .name('dump-event-log')
-  .description("dump the base unit's Contact ID event log")
+  .description('dump the base unit\'s Contact ID event log')
   .requiredOption('-c, --configfile <configfile>', 'configuration file name')
   .option('-v, --verbose', 'display all logging output')
   .option('-j, --json', 'emit JSON instead of a table')
