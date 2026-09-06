@@ -1,0 +1,2 @@
+# Ignore artifacts:
+# Prettier will follow rules specified in .gitignore
