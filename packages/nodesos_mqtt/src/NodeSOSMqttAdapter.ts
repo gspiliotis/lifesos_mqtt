@@ -41,6 +41,18 @@ const enabledStatuses = {
   m: ['Bypass', 'WarningBeepDelay', 'AlarmSiren'] satisfies Partial<keyof typeof ESFlags>[],
 };
 
+/**
+ * Enable-status flags Home Assistant can represent for a device's category.
+ *
+ * Only the controller, burglar, fire and medical categories have entries. The
+ * special (DC_SPECIAL, 'e' -- flood detectors and similar) and base unit
+ * (DC_BASEUNIT, 'z') categories have none, and indexing the map directly for
+ * those yields undefined, which is not iterable. Returning an empty list makes
+ * every caller a no-op for them instead of throwing.
+ */
+const enabledStatusesFor = (device: Device): (keyof typeof ESFlags)[] =>
+  enabledStatuses[device.category.code as keyof typeof enabledStatuses] ?? [];
+
 class NodeSOSMqttAdapter {
   private readonly baseunit: BaseUnit;
   private readonly config: Config;
@@ -209,7 +221,7 @@ class NodeSOSMqttAdapter {
     // Publish enableStatus
     this.publishDeviceProperty(deviceConfig.topic, device, 'enableStatus', device.enableStatus);
 
-    for (const statusName of enabledStatuses[device.category.code as keyof typeof enabledStatuses]) {
+    for (const statusName of enabledStatusesFor(device)) {
       const topic = `${deviceConfig.topic}/enabled_status/${statusName}/set`;
 
       // Subscribe to changes
@@ -222,6 +234,7 @@ class NodeSOSMqttAdapter {
 
     this.publishDeviceDiscoveryMessage(device, deviceConfig);
     this.publishDeviceRSSIDiscoveryMessage(device, deviceConfig);
+    this.publishDeviceLastSeenDiscoveryMessage(device, deviceConfig);
     this.publishDeviceBatteryDiscoveryMessage(device, deviceConfig);
     this.publishDeviceEnableStatusDiscoveryMessage(device, deviceConfig);
 
@@ -293,6 +306,12 @@ class NodeSOSMqttAdapter {
       return;
     }
 
+    // Any packet from the device proves it is alive, so refresh last_seen for
+    // every event rather than for Heartbeat alone. rssiDb is not a substitute:
+    // Device.notifyChange suppresses the callback when the value is unchanged,
+    // so a steady signal publishes nothing.
+    this.publish(`${deviceConfig.topic}/last_seen`, new Date().toISOString(), true);
+
     if ([DeviceEventCode.BatteryLow as number, DeviceEventCode.PowerOnReset as number].includes(eventCode)) {
       this.publish(`${deviceConfig.topic}/battery`, new IntEnum(DeviceEventCode, eventCode).string, true);
     }
@@ -341,7 +360,7 @@ class NodeSOSMqttAdapter {
     } else if (name === 'rssiDb') {
       this.publish(`${topic}/${name}`, String(value), true);
     } else if (name === 'enableStatus') {
-      for (const statusName of enabledStatuses[device.category.code as keyof typeof enabledStatuses]) {
+      for (const statusName of enabledStatusesFor(device)) {
         const isEnabled = Boolean(value.value & ESFlags[statusName as keyof typeof ESFlags]);
         this.publish(`${topic}/enabled_status/${statusName}`, String(isEnabled), true);
       }
@@ -431,7 +450,7 @@ class NodeSOSMqttAdapter {
   }
 
   private publishDeviceEnableStatusDiscoveryMessage(device: Device, config: DeviceConfig) {
-    for (const statusName of enabledStatuses[device.category.code as keyof typeof enabledStatuses]) {
+    for (const statusName of enabledStatusesFor(device)) {
       const message = {
         name: statusName,
         default_entity_id: sprintf('lifesos_%06x_es_%s', device.deviceId, statusName.toLowerCase()),
@@ -461,6 +480,25 @@ class NodeSOSMqttAdapter {
       state_topic: `${config.topic}/rssiDb`,
       device_class: 'signal_strength',
       unit_of_measurement: 'dB',
+      ...availabilityInfo(this.config.adapter.baseunit.topic),
+      entity_category: 'diagnostic',
+      ...deviceInfo(sprintf('lifesos_%06x', device.deviceId), config),
+    };
+
+    this.publish(
+      sprintf('%s/%s/%s/config', this.config.adapter.discovery_prefix, 'sensor', message.unique_id),
+      JSON.stringify(message),
+      false,
+    );
+  }
+
+  private publishDeviceLastSeenDiscoveryMessage(device: Device, config: DeviceConfig) {
+    const message = {
+      default_entity_id: sprintf('lifesos_%06x_last_seen', device.deviceId),
+      unique_id: sprintf('lifesos_%06x_last_seen', device.deviceId),
+      icon: 'mdi:clock-check-outline',
+      state_topic: `${config.topic}/last_seen`,
+      device_class: 'timestamp',
       ...availabilityInfo(this.config.adapter.baseunit.topic),
       entity_category: 'diagnostic',
       ...deviceInfo(sprintf('lifesos_%06x', device.deviceId), config),
@@ -514,6 +552,7 @@ class NodeSOSMqttAdapter {
       if (device) {
         this.publishDeviceDiscoveryMessage(device, deviceConfig);
         this.publishDeviceRSSIDiscoveryMessage(device, deviceConfig);
+        this.publishDeviceLastSeenDiscoveryMessage(device, deviceConfig);
         this.publishDeviceBatteryDiscoveryMessage(device, deviceConfig);
         this.publishDeviceEnableStatusDiscoveryMessage(device, deviceConfig);
       }

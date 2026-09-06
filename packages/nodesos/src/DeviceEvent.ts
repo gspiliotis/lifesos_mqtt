@@ -45,7 +45,7 @@ class DeviceEvent {
     this.deviceType = new IntEnum(DeviceType, parseInt(text.slice(11, 13), 16));
     this.deviceId = parseInt(text.slice(13, 19), 16);
     this.messageAttribute = parseInt(text.slice(19, 21), 16);
-    this.deviceCharacteristics = new FlagEnum(DCFlags, parseInt(text.substring(21, 23)));
+    this.deviceCharacteristics = new FlagEnum(DCFlags, parseInt(text.slice(21, 23), 16));
     this.currentStatus = parseInt(text.slice(23, 25), 16);
   }
 

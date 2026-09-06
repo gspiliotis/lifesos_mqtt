@@ -6,7 +6,12 @@ describe('Device Event', () => {
   test('constructor', () => {
     const response = new DeviceEvent(line);
     expect(response.currentStatus).toBe(154);
-    expect(response.deviceCharacteristics).toEqual(new FlagEnum(DCFlags, DCFlags.RFVoice | DCFlags.Reserved_b1));
+    // Characteristics are two hex digits like every other field in the packet.
+    // The slice here is "10", so 0x10 = Supervisory. Parsing it as decimal
+    // yields 10 = 0x0A = RFVoice | Reserved_b1, which is nonsense for a door
+    // magnet and disagrees with DeviceInfoResponse, which reads the same field
+    // via fromAsciiHex().
+    expect(response.deviceCharacteristics).toEqual(new FlagEnum(DCFlags, DCFlags.Supervisory));
     expect(response.deviceId).toBe(2161869);
     expect(response.deviceType).toEqual(new IntEnum(DeviceType, DeviceType.DoorMagnet));
     expect(response.eventCode).toEqual(new IntEnum(DeviceEventCode, DeviceEventCode.Open));
