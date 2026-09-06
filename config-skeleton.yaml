@@ -1,0 +1,54 @@
+# Settings for the LifeSOS interface
+lifesos:
+
+  # Host and Port for the LifeSOS TCP Server to connect as a client,
+  # or Port only to listen as a server for the LifeSOS TCP Client
+  host: 192.168.1.100
+  port: 1680
+
+  # Master password, if needed by network interface
+  password: ''
+
+# Settings for the MQTT client
+mqtt:
+
+  # URI providing the details needed to connect to the MQTT broker
+  # Refer https://github.com/mqtt/mqtt.github.io/wiki/URI-Scheme
+  uri: mqtt://username:password@127.0.0.1:1883
+
+  # Unique client identifier; no need to change unless running multiple instances
+  client_id: lifesos
+
+# Settings for the adapter between LifeSOS and MQTT
+adapter:
+
+  # To automatically configure devices in Home Assistant, ensure this line
+  # matches the setting in Home Assistant's config file.
+  # Refer https://www.home-assistant.io/docs/mqtt/discovery/
+  discovery_prefix: homeassistant
+
+  # Topic and Payload to announce Home Assistant has come online. When received,
+  # our MQTT client will send out the device configurations for discovery.
+  birth_topic: homeassistant/status
+  birth_payload: online
+
+  # Provide a topic for the Base Unit
+  baseunit:
+    topic: home/alarm
+    name: "LifeSOS"
+    manufacturer: "LifeSOS"
+    model: "LS-20"
+
+  # List your enrolled devices here and provide a topic
+  # Hint: Run 'list-devices' to get a list of device ids
+  devices:
+    - id: '012cba'
+      topic: home/kitchen/pir
+      name: "Kitchen"
+      manufacturer: "LifeSOS"
+      model: "PIR-3SP"
+    - id: '345def'
+      topic: home/front/door
+      name: "Front door"
+      manufacturer: "LifeSOS"
+      model: "TX-3DSN"
