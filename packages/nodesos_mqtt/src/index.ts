@@ -49,6 +49,17 @@ export type Config = {
     discovery_prefix: string;
     birth_topic: string;
     birth_payload: string;
+    /**
+     * Hours without a BatteryLow event after which the retained battery state
+     * is cleared. Set to 0 to disable. Defaults to 72.
+     */
+    battery_low_timeout_hours?: number;
+    /**
+     * Hours without any event from a device after which it is considered
+     * silent, and its battery state is left alone rather than cleared.
+     * Defaults to 48.
+     */
+    battery_stale_after_hours?: number;
     baseunit: BaseUnitConfig;
     devices: DeviceConfig[];
   };

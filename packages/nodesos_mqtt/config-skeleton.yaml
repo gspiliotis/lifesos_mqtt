@@ -32,6 +32,28 @@ adapter:
   birth_topic: homeassistant/status
   birth_payload: online
 
+  # Hours without a BatteryLow event after which the retained battery state is
+  # cleared, publishing PowerOnReset.
+  #
+  # The panel repeats BatteryLow roughly once a day for as long as a cell is
+  # flat, but emits nothing at all when one is replaced, so without this the
+  # retained BatteryLow sticks forever and is replayed to Home Assistant on
+  # every reconnect. Measured repeat intervals ran 21.8h-25.8h, with one
+  # dropped transmission producing a 46h gap, so anything at or below 48h
+  # risks clearing a battery that is still flat.
+  #
+  # Set to 0 to disable and keep the original behaviour.
+  battery_low_timeout_hours: 72
+
+  # Hours without ANY event from a device before it is treated as silent.
+  #
+  # A device that has stopped transmitting looks identical to one whose battery
+  # was replaced. Clearing the battery state for it would report a dead sensor
+  # as healthy, so the clear above is skipped unless the device has been heard
+  # from within this window. It is retried after each timeout, so a device that
+  # starts transmitting again is cleared then.
+  battery_stale_after_hours: 48
+
   # Provide a topic for the Base Unit
   baseunit:
     topic: home/alarm

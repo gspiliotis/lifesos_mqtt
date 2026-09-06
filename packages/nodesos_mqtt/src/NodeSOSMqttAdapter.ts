@@ -24,6 +24,29 @@ const logger = getLogger('NodeSOSMQTT');
 
 const AUTO_RESET_INTERVAL = 180;
 
+/**
+ * Hours without a BatteryLow event before the retained battery state is
+ * cleared.
+ *
+ * The panel repeats BatteryLow roughly daily for as long as a cell is flat,
+ * but never emits PowerOnReset when one is replaced, so the retained
+ * BatteryLow would otherwise stick forever. Measured repeat intervals across
+ * five devices ranged from 21.8h to 25.8h, with one observed dropped
+ * transmission producing a 46.0h gap; 72h clears that case with margin and
+ * tolerates two consecutive misses.
+ */
+const DEFAULT_BATTERY_LOW_TIMEOUT_HOURS = 72;
+
+/**
+ * Hours without any event from a device before it counts as silent.
+ *
+ * A device that has stopped transmitting altogether -- flat cell, removed,
+ * failed -- looks exactly like one whose battery was replaced. Clearing the
+ * battery state for it would report a dead sensor as healthy, so the clear is
+ * suppressed unless the device has been heard from within this window.
+ */
+const DEFAULT_BATTERY_STALE_AFTER_HOURS = 48;
+
 const enabledStatuses = {
   c: ['Delay', 'AlarmSiren', 'Latchkey'] satisfies Partial<keyof typeof ESFlags>[],
   b: [
@@ -64,6 +87,10 @@ class NodeSOSMqttAdapter {
   private subscriptions = new SubscriptionMap();
   private deviceSubscriptions = new SubscriptionMap();
   private autoResetHandlers = new Map<number, NodeJS.Timeout>();
+  private batteryLowHandlers = new Map<number, NodeJS.Timeout>();
+
+  /** Epoch milliseconds of the last event seen from each device. */
+  private lastSeenAt = new Map<number, number>();
 
   constructor(config: Config) {
     this.config = config;
@@ -85,6 +112,7 @@ class NodeSOSMqttAdapter {
     this.onBaseUnitMessage = this.onBaseUnitMessage.bind(this);
     this.onBirthMessage = this.onBirthMessage.bind(this);
     this.onEnabledStatusMessage = this.onEnabledStatusMessage.bind(this);
+    this.onBatteryMessage = this.onBatteryMessage.bind(this);
 
     this.baseunit.onDeviceAdded = this.baseunitDeviceAdded;
     this.baseunit.onDeviceDeleted = this.baseunitDeviceDeleted;
@@ -173,6 +201,11 @@ class NodeSOSMqttAdapter {
   }
 
   async stop() {
+    // A pending 72h battery timer would otherwise keep the event loop alive
+    // and stop the process exiting.
+    this.batteryLowHandlers.forEach((handler) => clearTimeout(handler));
+    this.batteryLowHandlers.clear();
+
     await this.baseunit.stop().catch(() => {
       logger.error('Error stopping base unit');
     });
@@ -231,6 +264,14 @@ class NodeSOSMqttAdapter {
 
       this.mqtt.subscribe(topic, { qos: 1 });
     }
+
+    // Read back our own retained battery state, so a BatteryLow published
+    // before a restart still gets a clear timer.
+    const batteryTopic = `${deviceConfig.topic}/battery`;
+    this.deviceSubscriptions.add(
+      new Subscription(batteryTopic, this.onBatteryMessage, { deviceId: device.deviceId, config: deviceConfig }),
+    );
+    this.mqtt.subscribe(batteryTopic, { qos: 1 });
 
     this.publishDeviceDiscoveryMessage(device, deviceConfig);
     this.publishDeviceRSSIDiscoveryMessage(device, deviceConfig);
@@ -310,9 +351,18 @@ class NodeSOSMqttAdapter {
     // every event rather than for Heartbeat alone. rssiDb is not a substitute:
     // Device.notifyChange suppresses the callback when the value is unchanged,
     // so a steady signal publishes nothing.
+    this.lastSeenAt.set(device.deviceId, Date.now());
     this.publish(`${deviceConfig.topic}/last_seen`, new Date().toISOString(), true);
 
     if ([DeviceEventCode.BatteryLow as number, DeviceEventCode.PowerOnReset as number].includes(eventCode)) {
+      // Arm before publishing so the retained message echoed back to our own
+      // subscription finds a timer already running and does nothing.
+      if (eventCode === (DeviceEventCode.BatteryLow as number)) {
+        this.armBatteryLowTimer(device.deviceId, deviceConfig);
+      } else {
+        this.clearBatteryLowTimer(device.deviceId);
+      }
+
       this.publish(`${deviceConfig.topic}/battery`, new IntEnum(DeviceEventCode, eventCode).string, true);
     }
 
@@ -334,6 +384,93 @@ class NodeSOSMqttAdapter {
         }, AUTO_RESET_INTERVAL * 1000),
       );
     }
+  }
+
+  /**
+   * Milliseconds without a BatteryLow event before the battery state is
+   * cleared, or null when the feature is disabled.
+   */
+  private get batteryLowTimeoutMs(): number | null {
+    const hours = this.config.adapter.battery_low_timeout_hours ?? DEFAULT_BATTERY_LOW_TIMEOUT_HOURS;
+    return hours > 0 ? hours * 3600 * 1000 : null;
+  }
+
+  private get batteryStaleAfterMs(): number {
+    return (this.config.adapter.battery_stale_after_hours ?? DEFAULT_BATTERY_STALE_AFTER_HOURS) * 3600 * 1000;
+  }
+
+  /**
+   * (Re)start the countdown to clearing a device's retained battery state.
+   *
+   * Every repeat of BatteryLow pushes the deadline out again, so the state is
+   * only cleared once the panel has stopped reporting the device as low.
+   */
+  private armBatteryLowTimer(deviceId: number, config: DeviceConfig) {
+    const timeout = this.batteryLowTimeoutMs;
+    if (timeout === null) {
+      return;
+    }
+
+    this.clearBatteryLowTimer(deviceId);
+
+    this.batteryLowHandlers.set(
+      deviceId,
+      setTimeout(() => {
+        this.batteryLowHandlers.delete(deviceId);
+
+        // A device that has gone silent altogether is not a device whose
+        // battery was replaced; claiming it recovered would mark a dead sensor
+        // healthy. Wait for it to speak again instead.
+        const lastSeen = this.lastSeenAt.get(deviceId);
+        const silentFor = lastSeen === undefined ? null : Date.now() - lastSeen;
+        if (silentFor === null || silentFor > this.batteryStaleAfterMs) {
+          logger.warn(
+            `Not clearing battery state for ${deviceId.toString(16)}: no events for ` +
+              `${silentFor === null ? 'the lifetime of this process' : `${Math.round(silentFor / 3600000)}h`}. ` +
+              'Will check again after the same interval.',
+          );
+          this.armBatteryLowTimer(deviceId, config);
+          return;
+        }
+
+        logger.info(
+          `Clearing battery state for ${deviceId.toString(16)}: no BatteryLow for ` +
+            `${Math.round(timeout / 3600000)}h and the device is still transmitting.`,
+        );
+        this.publish(`${config.topic}/battery`, new IntEnum(DeviceEventCode, DeviceEventCode.PowerOnReset).string, true);
+      }, timeout),
+    );
+  }
+
+  private clearBatteryLowTimer(deviceId: number) {
+    const handler = this.batteryLowHandlers.get(deviceId);
+    if (handler) {
+      clearTimeout(handler);
+      this.batteryLowHandlers.delete(deviceId);
+    }
+  }
+
+  /**
+   * Handles the device's own retained battery topic.
+   *
+   * Read back on connect, this is how a BatteryLow that was published before a
+   * restart still gets a timer: without it, a cell replaced while the adapter
+   * was down would never be followed by another BatteryLow, and the retained
+   * state would stick forever. Messages we publish ourselves also arrive here
+   * and are deliberately idempotent.
+   */
+  private onBatteryMessage(subscription: Subscription, message: string) {
+    const { deviceId, config } = subscription.args as { deviceId: number; config: DeviceConfig };
+
+    if (message === new IntEnum(DeviceEventCode, DeviceEventCode.BatteryLow).string) {
+      if (!this.batteryLowHandlers.has(deviceId)) {
+        logger.info(`Found retained BatteryLow for ${deviceId.toString(16)}; arming clear timer.`);
+        this.armBatteryLowTimer(deviceId, config);
+      }
+      return;
+    }
+
+    this.clearBatteryLowTimer(deviceId);
   }
 
   private deviceOnPropertiesChanged(device: Device, change: PropertyChangedInfo) {

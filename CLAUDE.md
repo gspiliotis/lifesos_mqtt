@@ -49,55 +49,95 @@ Conclusion: this panel reports batteries going bad and never reports them going
 good. No adapter change can derive a signal the hardware does not emit.
 Do not spend time re-investigating this.
 
-## Remaining options
+## Solved: timeout-based clear (implemented 2026-09-06)
 
-### A. Publish heartbeats as `last_seen` + RSSI (recommended patch)
-`deviceOnEvent` currently drops `Heartbeat` (2592 / `0x0A20`). Publishing it to a
-per-device `<topic>/last_seen` topic, along with the RSSI already carried in the
-packet, exposes the heartbeat stream to Home Assistant and enables per-device
-availability and signal-quality tracking.
+`BatteryLow` **does** repeat while a cell stays flat -- roughly once a day, per
+device. Measured from the full container log with a gap analysis over MINPIC
+`0x0A30` broadcasts:
 
-This is worth doing on its own merits and is an easy PR — it only adds
-information and changes no existing behaviour. It also provides the raw material
-for option B.
+| device | events | min | mean | max |
+|---|---|---|---|---|
+| `506b13a3` | 233 | 21.88h | 23.06h | 23.83h |
+| `4040121b` | 7 | 25.09h | 25.44h | 25.77h |
+| `404017c9` | 59 | 23.79h | 24.14h | 24.91h |
+| `40405072` | 61 | 21.81h | 23.34h | **45.96h** |
+| `40401029` | 27 | 24.30h | 41.85h | **235.88h** |
 
-### B. Gated heartbeat-as-clear (compromise, has a real flaw)
-Devices heartbeat on their supervision cycle regardless of battery state, so a
-naive "Heartbeat ⇒ publish PowerOnReset" clears a genuinely low battery and then
-re-sets it on the next `BatteryLow`, flapping the entity and spamming the
-notification blueprint. Only viable if gated — e.g. clear on Heartbeat only when
-no `BatteryLow` has been seen for two supervision intervals. Needs a small state
-machine, and the supervision interval is not currently known.
+The normal repeat interval is 21.8h-25.8h across every device. `40405072`'s
+45.96h gap is a single dropped transmission (its mean sits just above its min
+over 60 gaps). `40401029` is intermittent -- dropping its 235.88h outlier still
+leaves a 34.1h mean, so it has several multi-day silences, most likely battery
+replacements or a marginal cell.
 
-### C. Track battery age in Home Assistant instead (most robust)
-Given that the hardware has no recovery signal, deriving battery *state* is
-fighting the platform. Track battery *age* instead: an `input_datetime` per
-device, reset when a cell is changed, and one automation that notifies past a
-threshold. Keep `BatteryLow` as an early-warning trigger, and point Blackshome's
-blueprint only at devices that genuinely report both states.
+This makes a timeout viable, and fixes the value:
 
-Less elegant than an adapter fix, but it matches what the hardware actually
-knows and will not silently break when a sensor fails to cold-start.
+- **12h flaps** -- it expires between every pair of repeats.
+- **24h and 48h false-clear** -- 24h is below the routine maximum, and 48h sits
+  only 4% above the observed 45.96h dropped-report gap.
+- **72h** clears the dropped-report case with 57% margin, tolerates two
+  consecutive misses, and still clears a replaced cell within three days.
 
-## Manual reset (current stopgap)
-Publish the exact `payload_off` string, retained:
+Implemented in `deviceOnEvent` as `battery_low_timeout_hours` (default 72, 0
+disables). Each `BatteryLow` arms or re-arms a timer; expiry publishes the
+`payload_off` string `PowerOnReset`, retained.
+
+Two details that are load-bearing:
+
+1. **Restart handling.** A timer armed only when a `BatteryLow` *arrives* would
+   not fix anything: after a restart with the cell already replaced, no
+   `BatteryLow` ever comes, so no timer is ever armed and the retained value
+   stays stuck. The adapter therefore subscribes to each device's own
+   `<topic>/battery` and arms a timer when it reads back a retained
+   `BatteryLow` on connect. Messages it publishes itself also arrive there, so
+   the handler is idempotent -- it only arms when no timer is already running.
+2. **Liveness gate.** A silent device -- removed, failed, or a cell flat enough
+   to stop transmitting -- looks exactly like one whose battery was replaced.
+   Clearing it would report a dead sensor as healthy. The clear is skipped
+   unless the device has been heard from within `battery_stale_after_hours`
+   (default 48), using the `last_seen` tracking added at the same time, and
+   retried after each timeout so a device that resumes transmitting is cleared
+   then.
+
+Superseded option B (heartbeat-as-clear): unnecessary, since the repeat
+interval is now known and absence of `BatteryLow` is a cleaner signal than
+presence of `Heartbeat`.
+
+Superseded option C (track battery age in Home Assistant): only worth revisiting
+if the timeout proves unreliable in practice.
+
+Still open: the supervision/heartbeat interval (MINPIC `0x0A20`) has not been
+measured, so `battery_stale_after_hours` is set defensively rather than derived.
+If the gate proves too tight it fails safe -- nothing is cleared, which is the
+pre-existing behaviour.
+
+## Manual reset (override, no longer the primary mechanism)
+Still works, and is the way to clear a device immediately rather than waiting out
+`battery_low_timeout_hours`. Publish the exact `payload_off` string, retained:
 
     mosquitto_pub -h <broker> -t 'ls30/<dev>/<type>/battery' -r -m 'PowerOnReset'
 
-## Separate bugs found in the same code
+## Separate bugs found in the same code (both fixed 2026-09-06)
 
-**a. Crash on devices with no `enabledStatuses` entry** —
-`publishDeviceEnableStatusDiscoveryMessage` (dist line ~340) does
-`for (const statusName of enabledStatuses[device.category.code])`. For a flood detector
-the lookup returns `undefined` and the process dies with
-`TypeError: ... is not iterable`. Fires on every HA birth message, not just startup.
-Note the adapter logs "cannot be represented in Home Assistant and will be skipped"
-and then tries to publish enable-status discovery for it anyway — the skip guard does
-not cover this path. Minimal fix: `?? []`.
+**a. Crash on devices with no `enabledStatuses` entry** — FIXED.
+`enabledStatuses[device.category.code]` returned `undefined` for the special
+(`e`, flood detectors) and base unit (`z`) categories, and the process died with
+`TypeError: ... is not iterable`. It fired on every HA birth message, not just at
+startup. There were **three** call sites, not one: subscribe, property publish
+and discovery. All now go through an `enabledStatusesFor()` helper returning `[]`
+for unknown categories. Note the adapter logs "cannot be represented in Home
+Assistant and will be skipped" and then publishes enable-status discovery for the
+device anyway — the skip guard still does not cover that path, it simply no
+longer throws.
 
-**b. Missing radix in MINPIC parsing** — in `nodesos`, `DeviceEvent`:
-`parseInt(text.substring(21, 23))` has no radix, so `deviceCharacteristics` parses as
-decimal. `"10"` becomes 10 instead of 16; anything with a hex letter becomes `NaN`.
+**b. Missing radix in MINPIC parsing** — FIXED. `DeviceEvent` did
+`parseInt(text.substring(21, 23))` with no radix, so `deviceCharacteristics`
+parsed as decimal while every other field in the packet used base 16.
+`DeviceInfoResponse` reads the same field via `fromAsciiHex()`, so the two
+parsers disagreed. For a door magnet the slice `"10"` became decimal 10
+(`RFVoice | Reserved_b1`, nonsense) instead of `0x10` (`Supervisory`, correct).
+Nothing reads `DeviceEvent.deviceCharacteristics` — `Device` takes
+characteristics from `DeviceInfoResponse` — so there was no runtime symptom. The
+upstream test asserted the buggy value and was updated.
 
 ## MINPIC packet layout
 Offsets are into the whole line, `MINPIC=` prefix included:
@@ -147,18 +187,11 @@ Requires gawk.
 
     docker logs lifesos 2>&1 | ./decode.sh | grep -E 'PowerOnReset|BatteryLow'
 
-## Build blocker on a clean clone
+## Build blocker on a clean clone (fixed in this fork)
 
 `package.json` pins `"typescript": "^6.0.3"`. TypeScript 6 turned the previously
-inferred `rootDir` into a hard error, so `npm run build` fails on a fresh clone:
-
-    error TS5011: The common source directory of 'tsconfig.json' is './src'.
-    The 'rootDir' setting must be explicitly set...
-
-Fix — add to `tsconfig.json` `compilerOptions`, next to `outDir`:
-
-    "rootDir": "src",
-
-This is the value TypeScript was already inferring, so output layout is
-unchanged. Worth its own upstream PR; it breaks the build for anyone cloning
-today. Workaround without editing config: `npx tsc --rootDir src`.
+inferred `rootDir` into a hard error (`TS5011`), so upstream does not build on a
+fresh clone. `"rootDir": "src"` is now set explicitly in
+`packages/nodesos_mqtt/tsconfig.json`. This is the value tsc was already
+inferring, so output layout is unchanged. Still worth an upstream PR — it breaks
+the build for anyone cloning bratanon/nodesos_mqtt today.
