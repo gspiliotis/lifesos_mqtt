@@ -1,0 +1,27 @@
+{
+  "name": "lifesos_mqtt",
+  "version": "0.1.0",
+  "description": "Container build for the LifeSOS to MQTT bridge, with the nodesos and nodesos_mqtt sources vendored as git subtrees.",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com-gspiliotis:gspiliotis/lifesos_mqtt.git"
+  },
+  "workspaces": [
+    "packages/nodesos",
+    "packages/nodesos_mqtt"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=nodesos && npm run build --workspace=nodesos_mqtt",
+    "build:nodesos": "npm run build --workspace=nodesos",
+    "build:nodesos_mqtt": "npm run build --workspace=nodesos_mqtt",
+    "lint": "npm run lint --workspaces --if-present",
+    "prettier": "npm run prettier --workspaces --if-present",
+    "start": "node packages/nodesos_mqtt/dist/index.js",
+    "test": "npm run test --workspace=nodesos"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

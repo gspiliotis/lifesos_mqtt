@@ -21,7 +21,6 @@
     "build": "parcel build --no-source-maps --no-cache",
     "format:package": "npx sort-package-json",
     "lint": "eslint src",
-    "prepare": "husky",
     "prepublishOnly": "npm run build",
     "prettier": "prettier src --write",
     "test": "jest"

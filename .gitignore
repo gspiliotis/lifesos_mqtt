@@ -1,2 +1,20 @@
 .idea
 *.iml
+
+# Node
+node_modules/
+.npm
+
+# Build output
+packages/*/dist/
+.parcel-cache/
+
+# Generated at build time by scripts/generate-meta.js
+packages/nodesos_mqtt/src/meta.ts
+
+# Local runtime config (config/*.example.yaml is tracked)
+config/*.yaml
+!config/*.example.yaml
+
+# OS
+.DS_Store
