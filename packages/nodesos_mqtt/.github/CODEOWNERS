@@ -1,0 +1,9 @@
+# All files are by default owned by this user,
+# unless a more specific ownership rule is set below.
+* @bratanon
+
+# Don't automatically assign reviewers on PRs that only modify these files.
+# As they have no owner listed, these files are not owned by anyone.
+# This is to allow dependabot to automatically merge PRs.
+package.json
+package-lock.json
